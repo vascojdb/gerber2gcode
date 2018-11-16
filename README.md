@@ -1,2 +1,2 @@
-# development
-Development only
+# Development repository
+Use for development purposes only
