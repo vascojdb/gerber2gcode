@@ -1,2 +1,2 @@
-# Development repository
-Use for development purposes only
+# Project gerber2gcode
+Still under development
