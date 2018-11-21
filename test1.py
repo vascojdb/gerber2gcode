@@ -1,37 +1,43 @@
-# Python default libraries:
+# Import libraries:
 import zipfile
+import datetime
 import shutil
 import os
 import glob
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import messagebox
+from tkinter import simpledialog
 from PIL import Image
 
-# Libraries that need installation:
+# Libraries that need installation via pip in case you do not have them:
 import matplotlib.pyplot as plt
 
 # This application converts an RS274X gerber zip created in Labcenter Electronics Proteus
 # into a G-Code to a paste dispenser modified 3D printer
-# We need 3 files: The top paste file, the bottom paste file and the READ-ME file
-# > The top and bottom paste file contains (among other things) the center points (x,y) for the pads
+# We need 3 files from the zip package: The top paste file, the bottom paste file and the READ-ME file
+# > The top and bottom paste file contains (among other things) the center points (x,y) for the pads and the board edge
 # > The READ-ME file contains information of the pads and its size, we will use it to calculate
-#   the area of the pad and use it to calculate the quantity of paste we will need to drop
+#   the area of the pad and use it to calculate the quantity of paste we will need to extrude
 
-# Define the folder to extract the ZIP file, usually nobody needs to change these values:
-extract_path = "gerber_contents"
-picture_paste_bottom = "paste_bottom.png"
-picture_paste_top = "paste_top.png"
-gcode_bottom_filename = "bottom_layer.gcode"
-gcode_top_filename = "top_layer.gcode"
-
-# ============================================
-# ========== FUNCTIONS DEFINED HERE ==========
-# ============================================
+# Usually we don't need to modify these values:
+extract_path = "gerber_contents"                # Folder to extract the ZIP file
+picture_paste_bottom = "paste_bottom.png"       # Filename for the picture for the bottom paste layer
+picture_paste_top = "paste_top.png"             # Filename for the picture for the top paste layer
+gcode_bottom_filename = "bottom_layer.gcode"    # Filename for the gcode for the bottom paste layer
+gcode_top_filename = "top_layer.gcode"          # Filename for the gcode for the top paste layer
 
 
-# Converts thousand of inches (x10) to milliliters (the gerber file shows values in th*10 to avoid commas)
+# ==================================================
+# ========== FUNCTIONS DEFINED AFTER HERE ==========
+# ==================================================
+
+
+# Converts gerber's thousand of inches (x10) to milliliters
+# The gerber file shows values in th multiplied by 10 to avoid commas (decimal numbers) as they are hard to process
 # The th (UK) are also known as mils (US)
+# > Arguments: str
+# > Returns: int
 def convert_th10_to_mm(_th10_inches):
     # The correct formula is to divide with: 0.0393701 * 1000 (as we use th) * 10 (as the gerber uses th*10)
     return int(_th10_inches)/394
@@ -39,23 +45,31 @@ def convert_th10_to_mm(_th10_inches):
 
 # Converts thousand of inches to milliliters
 # The th (UK) are also known as mils (US)
+# > Arguments: str
+# > Returns: int
 def convert_th_to_mm(_th_inches):
     # The correct formula is to divide with: 0.0393701 * 1000 (as we use th)
     return int(_th_inches)/39.4
 
 
-# Gets the pad area in mm2, based on the pad type (D15, D27, etc)
-# This function will read the READ-ME gerber file and look for the pad type, extract the dimensions and calculate
-# the areas. The area calculation is made for RECT, CIRCLE and SQUARE
-# > By default the pads appear as FLASH, meaning they will just appear once in one place
-# > The type DRAW means that the object (CIRCLE, etc) is drawn from one point to the next one
-#   (for example to make a tick line), this is not relevant for our tool.
-# Usually the board edge appears as a CIRCLE-DRAW, but we usually know the board type is D70 (default), so we don't care
-# about thickness.
-def get_pad_area(_gerber_readme_filename, _pad_type):
+# Gets the pad area in mm2 based on the pad ID (D15, D27, etc)
+# This function will read the READ-ME gerber file and look for the pad ID, then extract the dimensions and calculate
+# the area. The area calculation is calculated according to the type of pad: RECT, CIRCLE and SQUARE
+# > By default the pads appear categorized as FLASH, this means the gerber processor knows they are supposed to be
+#   dropped on the x,y coordinates only.
+# > The type DRAW means that the object (CIRCLE, etc) is drawn from one x,y point to the next x,y one (next line),
+#   this type is not relevant for our analysis.
+#   For example to make a tick line, we define a circle with the thickness we want and DRAW it from x0,y0 to x1,y1.
+#   Usually the board edge appears as a CIRCLE-DRAW, but we know the default board type in Proteus is D70,
+#   so we ignore the thickness
+# > Arguments: str, str
+# > Returns: int, str
+def get_pad_area(_gerber_readme_filename, _pad_id):
     _pad_area = 0
+
+    # Check if the gerber file exists:
     if _gerber_readme_filename:
-        # Read the gerber file:
+        # Read the gerber file and get its contents:
         with open(_gerber_readme_filename) as _f:
             _file_contents = _f.read().splitlines()
 
@@ -64,48 +78,45 @@ def get_pad_area(_gerber_readme_filename, _pad_type):
             # Get the line content:
             _line_content = _file_contents[_line_number]
 
-            # Search for the line with the correct pad type (ex: D16):
-            if _line_content.find(_pad_type) == 0:
-                # If we have a rectangle:
+            # Search for the line with the correct given pad ID (ex: D16):
+            if _line_content.find(_pad_id) == 0:
+                # If we found a rectangle:
                 if _line_content.find("RECT") > 0:
-                    # Get the location of W and th, as in W=10th
-                    _W_location = _line_content.find("W", _line_content.find("RECT") + len("RECT"))
-                    _th_location = _line_content.find("th", _W_location)
+                    # Get the index of W and th on the line, but start searching from after the word RECT (ex: W=10th)
+                    _W_index = _line_content.find("W", _line_content.find("RECT") + len("RECT"))
+                    _th_index = _line_content.find("th", _W_index)
                     # Get the dimension by grabbing part of the string starting at W+2 (to exclude the W and the = sign)
-                    _pad_width = _line_content[(_W_location + 2):_th_location]
+                    _pad_width = _line_content[(_W_index + 2):_th_index]
 
-                    # Get the location of H and th, as in H=10th
-                    _H_location = _line_content.find("H", _line_content.find("RECT") + len("RECT"))
-                    _th_location = _line_content.find("th", _H_location)
+                    # Get the index of H and th on the line, but start searching from after the word RECT (ex: H=10th)
+                    _H_index = _line_content.find("H", _line_content.find("RECT") + len("RECT"))
+                    _th_index = _line_content.find("th", _H_index)
                     # Get the dimension by grabbing part of the string starting at H+2 (to exclude the H and the = sign)
-                    _pad_height = _line_content[(_H_location + 2):_th_location]
+                    _pad_height = _line_content[(_H_index + 2):_th_index]
 
-                    # Calculate the pad area in mm2:
-                    # Formula is: A=W*H
+                    # Calculate the pad area in mm2. The formula is: A=W*H:
                     _pad_area = convert_th_to_mm(_pad_width) * convert_th_to_mm(_pad_height)
 
-                # If we have a square:
+                # If we found a square:
                 if _line_content.find("SQUARE") > 0:
-                    # Get the location of S and th, as in S=10th
-                    _S_location = _line_content.find("S", _line_content.find("SQUARE") + len("SQUARE"))
-                    _th_location = _line_content.find("th", _S_location)
+                    # Get the index of S and th on the line, but start searching from after the word RECT (ex: S=10th)
+                    _S_index = _line_content.find("S", _line_content.find("SQUARE") + len("SQUARE"))
+                    _th_index = _line_content.find("th", _S_index)
                     # Get the dimension by grabbing part of the string starting at S+2 (to exclude the S and the = sign)
-                    _pad_side = _line_content[(_S_location + 2):_th_location]
+                    _pad_side = _line_content[(_S_index + 2):_th_index]
 
-                    # Calculate the pad area in mm2:
-                    # Formula is: A=S^2
+                    # Calculate the pad area in mm2. The formula is: A=S^2:
                     _pad_area = convert_th_to_mm(_pad_side) * convert_th_to_mm(_pad_side)
 
-                # If we have a circle:
+                # If we found a circle:
                 if _line_content.find("CIRCLE") > 0:
-                    # Get the location of D and th, as in D=10th, start after the word CIRCLE (start + length):
-                    _D_location = _line_content.find("D", _line_content.find("CIRCLE") + len("CIRCLE"))
-                    _th_location = _line_content.find("th", _D_location)
+                    # Get the index of D and th on the line, but start searching from after the word RECT (ex: D=10th)
+                    _D_index = _line_content.find("D", _line_content.find("CIRCLE") + len("CIRCLE"))
+                    _th_index = _line_content.find("th", _D_index)
                     # Get the dimension by grabbing part of the string starting at D+2 (to exclude the D and the = sign)
-                    _pad_diameter = _line_content[(_D_location + 2):_th_location]
+                    _pad_diameter = _line_content[(_D_index + 2):_th_index]
 
-                    # Calculate the pad area in mm2:
-                    # Formula is: A=D^2 * (pi/4)
+                    # Calculate the pad area in mm2. The formula is: A=D^2 * (pi/4):
                     _pad_area = convert_th_to_mm(_pad_diameter) * convert_th_to_mm(_pad_diameter) * 0.7854
     return _pad_area
 
@@ -113,10 +124,24 @@ def get_pad_area(_gerber_readme_filename, _pad_type):
 # Saves an image (graph) which will include the board limits, then the top and the bottom layer paste points
 # The size of the points will relate directly to their real area/size, in order to keep a better viewing accuracy
 # you can change the area_scale_multiplier below, which will scale the size of the points.
-def generate_images(_top_board_edge_pairs, _bottom_board_edge_pairs, _top_layer_pairs, _bottom_layer_pairs):
+
+
+# Generates a visual representation (as PNG image) of the board and the pads to be filled with soldering paste.
+# The function needs the list of x,y pairs for the board edge, the x,y pad pairs to extract coordinates and area and
+# the filename where to save the image to.
+# > Arguments: list, list, list, list
+# > Returns: -
+def generate_images(_board_pairs, _pad_pairs, _picture_paste_filename):
     area_scale_multiplier = 30
 
-    # Configure the graph space and axis:
+    # We will need this variables:
+    _board_edge_pairs_x = []
+    _board_edge_pairs_y = []
+    _pad_pairs_x = []
+    _pad_pairs_y = []
+    _pad_pairs_area = []
+
+    # Configure the graph space and axis (sets a fixed size, hides all frames and axis and sets an equal axis):
     plt.figure(figsize=(5, 5))
     ax1 = plt.axes(frameon=False)
     ax1.set_frame_on(False)
@@ -125,127 +150,265 @@ def generate_images(_top_board_edge_pairs, _bottom_board_edge_pairs, _top_layer_
     ax1.set_aspect('equal', 'datalim')
 
     # Get the X and Y coordinates for the board edges, then later draw them with a line:
-    # We need the *_inv value because the bottom layer is inverted on the horizontal axis:
-    _top_board_edge_pairs_x = [value[0] for value in _top_board_edge_pairs]
-    _top_board_edge_pairs_y = [value[1] for value in _top_board_edge_pairs]
-    _botton_board_edge_pairs_x = [value[0] for value in _bottom_board_edge_pairs]
-    _botton_board_edge_pairs_y = [value[1] for value in _bottom_board_edge_pairs]
+    for value in _board_pairs:
+        _board_edge_pairs_x.append(value[0])
+        _board_edge_pairs_y.append(value[1])
 
-    # Get the X and Y coordinates and the area for each pad, then later draw points with the appropriate size:
-    # We need the *_inv value because the bottom layer is inverted on the horizontal axis:
-    _bottom_layer_pairs_x = [value[0] for value in _bottom_layer_pairs]
-    _bottom_layer_pairs_y = [value[1] for value in _bottom_layer_pairs]
-    _bottom_layer_pairs_area = [value[3]*area_scale_multiplier for value in _bottom_layer_pairs]
+    # Get the X and Y coordinates, the area and type for each pad, then later draw points with the appropriate size:
+    for value in _pad_pairs:
+        _pad_pairs_x.append(value[0])
+        _pad_pairs_y.append(value[1])
+        _pad_pairs_area.append(value[3] * area_scale_multiplier)
 
-    # Get the X and Y coordinates and the area for each pad, then later draw points with the appropriate size:
-    _top_layer_pairs_x = [value[0] for value in _top_layer_pairs]
-    _top_layer_pairs_y = [value[1] for value in _top_layer_pairs]
-    _top_layer_pairs_area = [value[3] * area_scale_multiplier for value in _top_layer_pairs]
+    # Generate the correct title for the image:
+    if _picture_paste_filename == picture_paste_bottom:
+        plt.title('Bottom paste extruding pads')
+    else:
+        if _picture_paste_filename == picture_paste_top:
+            plt.title('Top paste extruding pads')
+        else:
+            plt.title('Paste extruding pads')
 
-    # Save the picture only with bottom points, then clean the graph:
-    plt.title('Bottom solder paste locations')
-    plt.plot(_botton_board_edge_pairs_x, _botton_board_edge_pairs_y, marker='', color='green')
-    plt.scatter(_bottom_layer_pairs_x, _bottom_layer_pairs_y, marker='s', s=_bottom_layer_pairs_area, color='gray')
-    plt.savefig(picture_paste_bottom, bbox_inches='tight')
-    plt.cla()
-
-    # Save the picture only with top points, then clean the graph:
-    plt.title('Top solder paste locations')
-    plt.plot(_top_board_edge_pairs_x, _top_board_edge_pairs_y, marker='', color='green')
-    plt.scatter(_top_layer_pairs_x, _top_layer_pairs_y, marker='s', s=_top_layer_pairs_area, color='gray')
-    plt.savefig(picture_paste_top, bbox_inches='tight')
-    plt.cla()
+    # Draw the board edge lines:
+    plt.plot(_board_edge_pairs_x, _board_edge_pairs_y, marker='', color='green', linewidth=2)
+    # Draw the pads for paste extrusion:
+    plt.scatter(_pad_pairs_x, _pad_pairs_y, marker='s', s=_pad_pairs_area, color='gray')
+    # Create a path line which the paste extruder will follow:
+    plt.plot(_pad_pairs_x, _pad_pairs_y, marker='.', color='blue', linewidth=0.5, markersize=3, linestyle='dashed')
+    # Save the image (with a tight border):
+    plt.savefig(_picture_paste_filename, bbox_inches='tight')
     return
 
 
-# This function is used to display an image. It will open the default picture viewer on the computer
+# Displays an image on the default image viewer of the computer
+# > Arguments: str
+# > Returns: -
 def display_image(_filename):
-    img = Image.open(_filename)
-    img.show()
+    # Check if the image file exists:
+    if _filename:
+        img = Image.open(_filename)
+        img.show()
+    return
 
 
-# This function looks for the minimum X and Y coordinates of the board, calculates the offset to 0,0
-# and moves the whole coordinates setting the board origin at 0,0
-def correct_layer_coordinates(_board_edge_pairs, _pad_layer_pairs, invert_x_axis=False):
-    if invert_x_axis:
+# Given the location of the board in space, this function calculates the needed translation (offset) to be applied
+# to all coordinates so the bottom left corner of the board is always located at 0,0.
+# The x axis may be inverted on the bottom layer by setting mirror_x_axis to True, as the gerber applies no mirroring
+# to the saved files. This is needed so you can flip the board and extrude solder paste correctly
+# > Arguments: list, list, boolean
+# > Returns: list, list
+def coordinate_translation(_edge_pairs, _pad_pairs, mirror_x_axis=False):
+    # Set the x coordinate multiplier if we want to mirror the x axis:
+    if mirror_x_axis:
         multiplier = -1
     else:
         multiplier = 1
 
-    _board_edge_pairs_x = [value[0]*multiplier for value in _board_edge_pairs]
-    _board_edge_pairs_y = [value[1] for value in _board_edge_pairs]
+    # Get all x and y coordinates for the board edge (and perform x mirror if needed):
+    _board_edge_pairs_x = [value[0]*multiplier for value in _edge_pairs]
+    _board_edge_pairs_y = [value[1] for value in _edge_pairs]
 
+    # Calculate the minimum, so we can know the translation (offset) needed to coordinate 0,0:
     _min_x = min(_board_edge_pairs_x)
     _min_y = min(_board_edge_pairs_y)
 
+    # Prepare variables to store the new data:
     _new_board_edge_pairs = []
     _new_pad_layer_pairs = []
 
-    for pair in _board_edge_pairs:
+    # Go through all the coordinates of the board edge and apply the translation (offset)
+    # so the bottom left corner of the board is located at 0,0, apply the x axis mirroring if needed:
+    for pair in _edge_pairs:
         _new_board_edge_pairs.append(((pair[0]*multiplier)-_min_x, pair[1]-_min_y))
 
-    for pair in _pad_layer_pairs:
+    # Go through all the coordinates of the pads and apply the same translation (offset) as above,
+    # apply the x axis mirroring if needed and maintain the other values (pad ID and area) intact:
+    for pair in _pad_pairs:
         _new_pad_layer_pairs.append(((pair[0]*multiplier)-_min_x, pair[1]-_min_y, pair[2], pair[3]))
 
     return _new_board_edge_pairs, _new_pad_layer_pairs
 
 
-def generate_gcode(_edge_pairs, _pad_pairs, _filename):
-    # Offset values in mm:
-    offset_x = 50
-    offset_y = 50
-    offset_z = 1
-    offset_z_travel = 3
+# This function will generate the g-code for a specific pair of coordinates for the edge and pads
+# Then it saves the file on the specified filename
 
+# Generates the g-code based on the board edge pairs and pad pairs for a given layer.
+# The file is saved to the given filename.
+# > Arguments: list, list, str, float, float, float, float
+# > Returns: -
+def generate_gcode(_edge_pairs, _pad_pairs, _filename):
+    # Some printing settings:
+    alignment_speed = 500       # The printer speed for alignment tasks
+    movement_speed = 5000       # The printer speed for extruding tasks
+    offset_x = 30.0             # Offset of the x axis to the 0,0 of the board
+    offset_y = 30.0             # Offset of the y axis to the 0,0 of the board
+    offset_z = 1.0              # Offset of the needle from the bed to the top of the board (depends on PCB thickness)
+    offset_z_travel = 3.0       # Offset of the needle for traveling: how much the needle will lift from the bed to move
+
+    make_pre_alignment = False
+    make_dry_run = False
+
+    # Ask a few questions:
+    # Pre-alignment:
+    if messagebox.askyesno("G-code generator - Pre-alignment",
+                           "Do you want to include a pre-alignment routing on your g-code?"):
+        make_pre_alignment = True
+
+    # PCB/board offsets::
+    if messagebox.askyesno("G-code generator - PCB offset",
+                           "Currently your PCB offsets are:\n"
+                           "  x = " + str(offset_x) + "\n"
+                           "  y = " + str(offset_y) + "\n"
+                           "Do you want to change them?"):
+        # Ask for the new x offset (we need to add a lot of spaces as the window is very small):
+        result = simpledialog.askfloat("New x offset",
+                                       "Specify the new x offset:                          ",
+                                       initialvalue=offset_x,
+                                       minvalue=0.0)
+        # If the value is not None (the user didn't close or canceled the dialog), then apply the new value
+        if result is not None:
+            offset_x = result
+
+        # Ask for the new y offset (we need to add a lot of spaces as the window is very small):
+        result = simpledialog.askfloat("New y offset",
+                                       "Specify the new y offset:                          ",
+                                       initialvalue=offset_y,
+                                       minvalue=0.0)
+        # If the value is not None (the user didn't close or canceled the dialog), then apply the new value
+        if result is not None:
+            offset_y = result
+
+    # Dry-run:
+    if messagebox.askyesno("G-code generator - Dry run",
+                           "Do you want to generate a dry run g-code? (no paste extruding)"):
+        make_dry_run = True
+
+    # Get current time:
+    datetime_now = datetime.datetime.now()
+
+    # Create the g-code file and open for writing:
     gcode_file = open(_filename, "w")
 
-    gcode_file.write("; Generated by gerber2gcode" + '\n')
-    gcode_file.write("; Coded by: vascojdb@gmail.com, magdalena.wiktoria.szczypka@gmail.com" + '\n')
+    gcode_file.write("; Generated by gerber2gcode on " + datetime_now.strftime("%Y-%m-%d %H:%M") + '\n')
+    gcode_file.write("; Created by: vascojdb@gmail.com, magdalena.wiktoria.szczypka@gmail.com" + '\n')
+    gcode_file.write("; https://github.com/vascojdb, https://github.com/magdalenaws" + '\n')
+    gcode_file.write("; Visit us at http://smartixx.com" + '\n')
     gcode_file.write("" + '\n')
+    gcode_file.write("; BEGIN OF PRE-PREPARATIONS SECTION" + '\n')
     gcode_file.write("M107 ; fan off" + '\n')
     gcode_file.write("M117 Preparing ; display message" + '\n')
     gcode_file.write("G90 ; absolute positioning" + '\n')
-    gcode_file.write("G21 ; set units to millimeters" + '\n')
+    gcode_file.write("G21 ; set units to millimetres" + '\n')
     gcode_file.write("G28 ; auto home" + '\n')
-    gcode_file.write("G1 Z10 F5000 ; lift nozzle" + '\n')
-    gcode_file.write("G1 F5000 ; set movement speed" + '\n')
+    gcode_file.write("G1 Z10 F" + str(movement_speed) + " ; lift nozzle" + '\n')
+    gcode_file.write("G1 F" + str(movement_speed) + " ; set movement speed" + '\n')
+    gcode_file.write("; END OF PRE-PREPARATIONS SECTION" + '\n')
+
+    if make_pre_alignment:
+        gcode_file.write("" + '\n')
+        gcode_file.write("; BEGIN OF ALIGNMENT SECTION" + '\n')
+        gcode_file.write("M117 Aligning ; display message" + '\n')
+        for pair in _edge_pairs:
+            pos_x = float(pair[0]) + offset_x
+            pos_y = float(pair[1]) + offset_y
+            gcode_file.write("G1 X" + str("%.3f" % pos_x) + " Y" + str("%.3f" % pos_y) + " F" + str(alignment_speed) + '\n')
+            gcode_file.write("G1 Z" + str("%.3f" % offset_z) + " F" + str(alignment_speed) + '\n')
+            gcode_file.write("M0 Click to move to next point..." + '\n')
+            gcode_file.write("G1 Z" + str("%.3f" % offset_z_travel) + " F" + str(alignment_speed) + '\n')
+        gcode_file.write("; END OF ALIGNMENT SECTION" + '\n')
+
+    gcode_file.write("" + '\n')
+    gcode_file.write("; BEGIN OF PASTE EXTRUDING SECTION" + '\n')
     gcode_file.write("M75 ; start print job timer" + '\n')
     gcode_file.write("M73 P0 ; set print progress" + '\n')
-
-    gcode_file.write("" + '\n')
-    gcode_file.write("M117 Aligning ; display message" + '\n')
-    for pair in _edge_pairs:
-        pos_x = float(pair[0]) + offset_x
-        pos_y = float(pair[1]) + offset_y
-        gcode_file.write("G1 X" + str("%.3f" % pos_x) + " Y" + str("%.3f" % pos_y) + '\n')
-        gcode_file.write("G1 Z" + str("%.3f" % offset_z) + " F5000" + '\n')
-        gcode_file.write("G1 Z" + str("%.3f" % offset_z_travel) + " F5000" + '\n')
-
-    gcode_file.write("" + '\n')
-    gcode_file.write("M117 Printing ; display message" + '\n')
+    gcode_file.write("M117 Applying solder paste ; display message" + '\n')
     for pair in _pad_pairs:
         pos_x = float(pair[0]) + offset_x
         pos_y = float(pair[1]) + offset_y
         gcode_file.write("G1 X" + str("%.3f" % pos_x) + " Y" + str("%.3f" % pos_y) + '\n')
-        gcode_file.write("G1 Z" + str("%.3f" % offset_z) + " F5000" + '\n')
-        # Add gcode here to push solder paste
-        gcode_file.write("G1 Z" + str("%.3f" % offset_z_travel) + " F5000" + '\n')
+        gcode_file.write("G1 Z" + str("%.3f" % offset_z) + " F" + str(movement_speed) + '\n')
+        if make_dry_run:
+            gcode_file.write("; DRY RUN - Would extrude paste here" + '\n')
+        else:
+            # TODO: Add gcode to extrude solder paste
+            gcode_file.write("; TODO" + '\n')
+        gcode_file.write("G1 Z" + str("%.3f" % offset_z_travel) + " F" + str(movement_speed) + '\n')
+        # TODO: Add code to automatically change percentage
+        gcode_file.write("M73 P100 ; set print progress" + '\n')
+    gcode_file.write("M73 P100 ; set print progress" + '\n')
+    gcode_file.write("M77 ; stop print job timer" + '\n')
+    gcode_file.write("; END OF PASTE EXTRUDING SECTION" + '\n')
 
     gcode_file.write("" + '\n')
+    gcode_file.write("; BEGIN OF FINAL PREPARATIONS " + '\n')
     gcode_file.write("G1 X0 F10000 ; move X to position 0" + '\n')
     gcode_file.write("G1 Y150 F10000 ; move bed to the front" + '\n')
     gcode_file.write("M84 ; turn steppers off" + '\n')
-    gcode_file.write("M73 P100 ; set print progress" + '\n')
-    gcode_file.write("M77 ; stop print job timer" + '\n')
     gcode_file.write("M117 Finished ; display message" + '\n')
     gcode_file.write("M300 S900 P1000; Play beep" + '\n')
+    gcode_file.write("; END OF FINAL PREPARATIONS " + '\n')
 
+    gcode_file.write("" + '\n')
+    gcode_file.write("; END OF FILE " + '\n')
     gcode_file.close()
     return
+
+
+def get_edge_and_pad_coordinates(_gerber_paste_filename, _gerber_readme_filename):
+    # Initiate variables that will be needed later:
+    _pad_id = None
+    _pad_area = 0
+    _edge_pairs = []
+    _pad_pairs = []
+
+    # Do this task if we have a top layer:
+    if _gerber_paste_filename:
+        # Read the top layer gerber file:
+        with open(_gerber_paste_filename) as f:
+            _file_contents = f.read().splitlines()
+
+        # Process the file line by line:
+        for _line_number in range(len(_file_contents)):
+            # Get the line content:
+            _line_content = _file_contents[_line_number]
+
+            # Search for the command to start the coordinates of a specific pad size (ex: G54D07*):
+            if _line_content.find("G54") == 0:
+                # Get the Dxx part of the string (which starts after G54, so position 3) (ex: D07*):
+                _pad_id = _line_content[3:]
+                # Remove the '*' in the end of the line (ex: D07) to get the pad type:
+                _pad_id = _pad_id.replace('*', '')
+                # Get the pad area:
+                _pad_area = get_pad_area(_gerber_readme_filename, _pad_id)
+
+            # Search for coordinates (ex: X+8715Y-3543D03*), the line always starts with an X:
+            if _line_content.find("X") == 0:
+                # Get the location on the line where the X and Y part are located
+                _X_index = _line_content.find("X")
+                _Y_index = _line_content.find("Y")
+                _D_index = _line_content.find("D")
+
+                # Extract the X coordinate which is located between X+1 (+1 to ignore the letter X) and Y location
+                _X_coordinate_th10 = _line_content[(_X_index + 1):_Y_index]
+                _Y_coordinate_th10 = _line_content[(_Y_index + 1):_D_index]
+
+                # Coordinates are in thousands on an inch, we need them in milliliters:
+                _X_coordinate_mm = convert_th10_to_mm(_X_coordinate_th10)
+                _Y_coordinate_mm = convert_th10_to_mm(_Y_coordinate_th10)
+
+                # The D70 type always refers to the board edges for Proteus:
+                if _pad_id == "D70":
+                    _edge_pairs.append((_X_coordinate_mm, _Y_coordinate_mm))
+                else:
+                    _pad_pairs.append((_X_coordinate_mm, _Y_coordinate_mm, _pad_id, _pad_area))
+
+    return _edge_pairs, _pad_pairs
+
 
 # ===========================================
 # ========== MAIN CODE STARTS HERE ==========
 # ===========================================
+
 
 # Create the window manager and hide it as we don't need a main window:
 root = tk.Tk()
@@ -321,136 +484,55 @@ if not gerber_readme_filename:
                          "No gerber file found for the pad size information\nCan't continue!")
     exit(0)
 
-# Initiate variables that will be needed later:
-pad_type = None
-top_layer_pairs = []
-top_board_edge_pairs = []
-bottom_layer_pairs = []
-bottom_board_edge_pairs = []
-bottom_layer_pairs_inv = []
-bottom_board_edge_pairs_inv = []
 
-# Do this task if we have a top layer:
+# Perform actions for the top layer:
 if gerber_top_paste_filename:
-    # Read the top layer gerber file:
-    with open(gerber_top_paste_filename) as f:
-        file_contents = f.read().splitlines()
+    # Analyse the gerber files and extract the board edge coordinates and pad coordinates and information:
+    top_edge_pairs, top_pad_pairs = get_edge_and_pad_coordinates(gerber_top_paste_filename,
+                                                                 gerber_readme_filename)
 
-    # Process the file line by line:
-    for line_number in range(len(file_contents)):
-        # Get the line content:
-        line_content = file_contents[line_number]
+    # We need to translate (offset) the coordinates so that the board origins from 0,0
+    # The top layer we will not invert the x axis:
+    top_edge_pairs, top_pad_pairs = coordinate_translation(top_edge_pairs,
+                                                           top_pad_pairs,
+                                                           False)
+    
+    # Generate the images/graphs with the pad locations:
+    generate_images(top_edge_pairs, top_pad_pairs, picture_paste_top)
 
-        # Search for the command to start the coordinates of a specific pad size (ex: G54D07*):
-        if line_content.find("G54") == 0:
-            # Get the Dxx part of the string (which starts after G54, so position 3) (ex: D07*):
-            pad_type = line_content[3:]
-            # Remove the '*' in the end of the line (ex: D07) to get the pad type:
-            pad_type = pad_type.replace('*', '')
-            # Get the pad area:
-            pad_area = get_pad_area(gerber_readme_filename, pad_type)
-            #print("Pad type: " + pad_type + " (area: " + str(pad_area) + ")")
+    # Display generated image:
+    display_image(picture_paste_top)
 
-        # Search for coordinates (ex: X+8715Y-3543D03*), the line always starts with an X:
-        if line_content.find("X") == 0:
-            # Get the location on the line where the X and Y part are located
-            X_location = line_content.find("X")
-            Y_location = line_content.find("Y")
-            D_location = line_content.find("D")
-
-            # Extract the X coordinate which is located between X+1 (+1 to ignore the letter X) and Y location
-            X_coordinate_th10 = line_content[(X_location + 1):Y_location]
-            Y_coordinate_th10 = line_content[(Y_location + 1):D_location]
-
-            # Coordinates are in thousands on an inch, we need them in milliliters:
-            X_coordinate_mm = convert_th10_to_mm(X_coordinate_th10)
-            Y_coordinate_mm = convert_th10_to_mm(Y_coordinate_th10)
-
-            # The D70 type always refers to the board edges for Proteus:
-            if pad_type == "D70":
-                top_board_edge_pairs.append((X_coordinate_mm, Y_coordinate_mm))
-            else:
-                top_layer_pairs.append((X_coordinate_mm, Y_coordinate_mm, pad_type, pad_area))
-
-# Do this task if we have a bottom layer:
-if gerber_bottom_paste_filename:
-    # Read the bottom layer gerber file:
-    with open(gerber_bottom_paste_filename) as f:
-        file_contents = f.read().splitlines()
-
-    # Process the file line by line:
-    for line_number in range(len(file_contents)):
-        # Get the line content:
-        line_content = file_contents[line_number]
-
-        # Search for the command to start the coordinates of a specific pad size (ex: G54D07*):
-        if line_content.find("G54") == 0:
-            # Get the Dxx part of the string (which starts after G54, so position 3) (ex: D07*):
-            pad_type = line_content[3:]
-            # Remove the '*' in the end of the line (ex: D07) to get the pad type:
-            pad_type = pad_type.replace('*', '')
-            # Get the pad area:
-            pad_area = get_pad_area(gerber_readme_filename, pad_type)
-            #print("Pad type: " + pad_type + " (area: " + str(pad_area) + ")")
-
-        # Search for coordinates (ex: X+8715Y-3543D03*), the line always starts with an X:
-        if line_content.find("X") == 0:
-            # Get the location on the line where the X and Y part are located
-            X_location = line_content.find("X")
-            Y_location = line_content.find("Y")
-            D_location = line_content.find("D")
-
-            # Extract the X coordinate which is located between X+1 (+1 to ignore the letter X) and Y location
-            X_coordinate_th10 = line_content[(X_location + 1):Y_location]
-            Y_coordinate_th10 = line_content[(Y_location + 1):D_location]
-
-            # Coordinates are in thousands on an inch, we need them in milliliters:
-            X_coordinate_mm = convert_th10_to_mm(X_coordinate_th10)
-            Y_coordinate_mm = convert_th10_to_mm(Y_coordinate_th10)
-
-            # The D70 type always refers to the board edges for Proteus:
-            if pad_type == "D70":
-                bottom_board_edge_pairs.append((X_coordinate_mm, Y_coordinate_mm))
-            else:
-                bottom_layer_pairs.append((X_coordinate_mm, Y_coordinate_mm, pad_type, pad_area))
-
-
-# We need to offset and correct the coordinates and mirror the bottom layer,
-# as usually the board is far away from 0,0 and the bottom layer is not inverted.
-if gerber_top_paste_filename:
-    top_board_edge_pairs, top_layer_pairs = correct_layer_coordinates(top_board_edge_pairs,
-                                                                      top_layer_pairs,
-                                                                      False)
-if gerber_bottom_paste_filename:
-    bottom_board_edge_pairs_inv, bottom_layer_pairs_inv = correct_layer_coordinates(bottom_board_edge_pairs,
-                                                                                    bottom_layer_pairs,
-                                                                                    True)
-
-#print("Board edges:")
-#print(top_board_edge_pairs)
-#print(bottom_board_edge_pairs_inv)
-#print("Top layer pads:")
-#print(top_layer_pairs)
-#print("Bottom layer pads:")
-#print(bottom_layer_pairs_inv)
-
-# Generate the images/graphs with the pad locations, and then display the result:
-generate_images(top_board_edge_pairs, bottom_board_edge_pairs_inv, top_layer_pairs, bottom_layer_pairs_inv)
-
-# Display generated images:
-display_image(picture_paste_top)
-display_image(picture_paste_bottom)
-
-# Ask here if we want to do something with the top layer:
-if gerber_top_paste_filename:
     if messagebox.askyesno("Top layer solder paste G-Code generation",
                            "Do you want to generate a G-Code print file for the top solder paste layer?"):
-        generate_gcode(top_board_edge_pairs, top_layer_pairs, gcode_top_filename)
+        # Generate g-code for the top layer:
+        generate_gcode(top_edge_pairs, top_pad_pairs, gcode_top_filename)
+        # Open the generated file on the default text viewer for .gcode:
+        os.startfile(gcode_top_filename, 'open')
 
-# Ask here if we want to do something with the bottom layer:
+# Perform actions for the bottom layer:
 if gerber_bottom_paste_filename:
+    # Analyse the gerber files and extract the board edge coordinates and pad coordinates and information:
+    bottom_edge_pairs, bottom_pad_pairs = get_edge_and_pad_coordinates(gerber_bottom_paste_filename,
+                                                                             gerber_readme_filename)
+
+    # We need to translate (offset) the coordinates so that the board origins from 0,0
+    # The bottom layer we will invert the x axis:
+    bottom_edge_pairs, bottom_pad_pairs = coordinate_translation(bottom_edge_pairs,
+                                                                 bottom_pad_pairs,
+                                                                 True)
+    
+    # Generate the images/graphs with the pad locations:
+    generate_images(bottom_edge_pairs, bottom_pad_pairs, picture_paste_bottom)
+
+    # Display generated image:
+    display_image(picture_paste_bottom)
+
     if messagebox.askyesno("Bottom layer solder paste G-Code generation",
                            "Do you want to generate a G-Code print file for the bottom solder paste layer?"):
-        generate_gcode(bottom_board_edge_pairs_inv, bottom_layer_pairs_inv, gcode_bottom_filename)
+        # Generate g-code for the top layer:
+        generate_gcode(bottom_edge_pairs, bottom_pad_pairs, gcode_bottom_filename)
+        # Open the generated file on the default text viewer for .gcode:
+        os.startfile(gcode_bottom_filename, 'open')
 
-print("END")
+print("Application concluded. Exiting...")
