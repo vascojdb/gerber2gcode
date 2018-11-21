@@ -1,2 +1,2 @@
-# Project gerber2gcode
+# gerber2gcode
 Still under development
