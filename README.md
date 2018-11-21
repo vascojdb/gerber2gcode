@@ -1,8 +1,10 @@
 # gerber2gcode
  
 * [Intro](#id1)
-* [Software](#id2)
-* [Hardware](#id3)
+* [Installation](#id2)
+* [Running](#id3)
+* [Version history and planned features](#id4)
+* [Hardware](#id9)
 * [Donate](#id10)
 
 
@@ -13,13 +15,21 @@ gerber2gcode is an application written in Python with the single purpose of conv
 The 3D printer will then extrude the correct amount of solder past in the correct pads of the PCB using any method available.
 In my case I have an air solder paste dispenser with a syringe and a pedal.
 
-## Software <a name="id2"></a>
-The application is written in **Python 3.7.1**. Most libraries are included with Python default installation, the only dependency that you need to install with pip is **Matplotlib 3.0.2** or later.
+## Installation <a name="id2"></a>
+The application was written in **Python 3.7.1** in PyCharm IDE. Most libraries are included with Python default installation, the only dependency that you need to install with pip is **Matplotlib 3.0.2** or later.
 
 You can install **Matplotlib 3.0.2** by running:  
 `python -m pip install -U pip`  
 `python -m pip install -U matplotlib`
 
+## Running <a name="id3"></a>
+**NOTE:** The software was verified to work on Microsoft Windows OS. I did not verify if it runs on any other OS.
+
+You can run the script in several ways:
+* Run it via command line, by navigating to the folder where you have the .py file and by running `python gerber2gcode.py`
+* Run it via any Python IDE such as PyCharms, by pressing the Run button.
+
+## Version history and features <a name="id4"></a>
 The current version (v0.3) only accepts RS274X Gerber ZIP files created in Labcenter Electronics Proteus.  
 But hopefully I will have time to adapt the code to other software like Eagle, etc.
 
@@ -45,7 +55,7 @@ alt="SmartiXX R&D #1 - gerber2gcode v0.3" width="240" height="180" border="10" /
 
 If you feel like helping the project, **feel free to contribute**!
 
-## Hardware <a name="id3"></a>
+## Hardware <a name="id9"></a>
 For this project you will need the following (or similar) equipment:
 * Tronxy X1 3D printer (modified: head removed and replaced with an adapter for the syringe)
 * YDL-983A solder paste dispenser

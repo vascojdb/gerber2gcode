@@ -4,6 +4,7 @@
       <w>extruder</w>
       <w>filenames</w>
       <w>gcode</w>
+      <w>smarti</w>
     </words>
   </dictionary>
 </component>
