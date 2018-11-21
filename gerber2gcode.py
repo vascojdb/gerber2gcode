@@ -317,8 +317,13 @@ def generate_gcode(_edge_pairs, _pad_pairs, _filename):
     gcode_file.write("" + '\n')
     gcode_file.write("; BEGIN OF PASTE EXTRUDING SECTION" + '\n')
     gcode_file.write("M75 ; start print job timer" + '\n')
-    gcode_file.write("M73 P0 ; set print progress" + '\n')
+    gcode_file.write("M73 P0 ; set print progress percentage" + '\n')
     gcode_file.write("M117 Applying solder paste ; display message" + '\n')
+
+    # Variables to calculate the current job percentage:
+    total_points = len(_pad_pairs)
+    current_point = 0
+
     for pair in _pad_pairs:
         pos_x = float(pair[0]) + offset_x
         pos_y = float(pair[1]) + offset_y
@@ -330,9 +335,13 @@ def generate_gcode(_edge_pairs, _pad_pairs, _filename):
             # TODO: Add gcode to extrude solder paste
             gcode_file.write("; TODO" + '\n')
         gcode_file.write("G1 Z" + str("%.3f" % offset_z_travel) + " F" + str(movement_speed) + '\n')
-        # TODO: Add code to automatically change percentage
-        gcode_file.write("M73 P100 ; set print progress" + '\n')
-    gcode_file.write("M73 P100 ; set print progress" + '\n')
+
+        # Calculate percentage of job already done:
+        current_point += 1
+        current_percentage = (100*current_point)/total_points
+        gcode_file.write("M73 P" + str("%.0f" % current_percentage) + '\n')
+
+    gcode_file.write("M73 P100 ; set print progress percentage" + '\n')
     gcode_file.write("M77 ; stop print job timer" + '\n')
     gcode_file.write("; END OF PASTE EXTRUDING SECTION" + '\n')
 
