@@ -24,6 +24,7 @@ The current version (v0.3) only accepts RS274X Gerber ZIP files created in Labce
 But hopefully I will have time to adapt the code to other software like Eagle, etc.
 
 
+Video - SmartiXX R&D #1 - gerber2gcode v0.3<br>
 <a href="http://www.youtube.com/watch?feature=player_embedded&v=GD7z5hcu2xU
 " target="_blank"><img src="http://img.youtube.com/vi/GD7z5hcu2xU/0.jpg" 
 alt="SmartiXX R&D #1 - gerber2gcode v0.3" width="240" height="180" border="10" /></a>
