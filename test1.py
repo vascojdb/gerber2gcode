@@ -229,9 +229,6 @@ def coordinate_translation(_edge_pairs, _pad_pairs, mirror_x_axis=False):
     return _new_board_edge_pairs, _new_pad_layer_pairs
 
 
-# This function will generate the g-code for a specific pair of coordinates for the edge and pads
-# Then it saves the file on the specified filename
-
 # Generates the g-code based on the board edge pairs and pad pairs for a given layer.
 # The file is saved to the given filename.
 # > Arguments: list, list, str, float, float, float, float
@@ -354,6 +351,13 @@ def generate_gcode(_edge_pairs, _pad_pairs, _filename):
     return
 
 
+# Analyses the 2 gerber files (top/bottom SMD paste and READ-ME) and extracts the coordinates of the board edge
+# as well as the coordinates for all pads, their ID and their area, so later we can extrude paste depending on the area
+# For Proteus, we assume the command to specify a pad ID is G54 followed by the pad ID itself
+# We also assume coordinates always start with the letter X
+# And finally we assume the board edge is delimited by 5 points with the D70 as pad ID
+# > Arguments: str, str
+# > Returns: list, list
 def get_edge_and_pad_coordinates(_gerber_paste_filename, _gerber_readme_filename):
     # Initiate variables that will be needed later:
     _pad_id = None
@@ -372,10 +376,12 @@ def get_edge_and_pad_coordinates(_gerber_paste_filename, _gerber_readme_filename
             # Get the line content:
             _line_content = _file_contents[_line_number]
 
-            # Search for the command to start the coordinates of a specific pad size (ex: G54D07*):
+            # Search for the command to start the coordinates of a specific pad ID (ex: G54D07*):
             if _line_content.find("G54") == 0:
-                # Get the Dxx part of the string (which starts after G54, so position 3) (ex: D07*):
-                _pad_id = _line_content[3:]
+                # Get the Dxx part of the string (pad ID, which starts after G54) (ex: D07*):
+                _D_index = _line_content.find("D")
+                _pad_id = _line_content[_D_index:]
+
                 # Remove the '*' in the end of the line (ex: D07) to get the pad type:
                 _pad_id = _pad_id.replace('*', '')
                 # Get the pad area:
@@ -396,7 +402,7 @@ def get_edge_and_pad_coordinates(_gerber_paste_filename, _gerber_readme_filename
                 _X_coordinate_mm = convert_th10_to_mm(_X_coordinate_th10)
                 _Y_coordinate_mm = convert_th10_to_mm(_Y_coordinate_th10)
 
-                # The D70 type always refers to the board edges for Proteus:
+                # The D70 pad ID always refers to the board edges for Proteus:
                 if _pad_id == "D70":
                     _edge_pairs.append((_X_coordinate_mm, _Y_coordinate_mm))
                 else:
