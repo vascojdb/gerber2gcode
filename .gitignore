@@ -3,3 +3,4 @@
 gerber_contents
 *.bak*
 __pycache__/
+*.output
