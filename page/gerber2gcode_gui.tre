@@ -1,0 +1,25 @@
+PAGE
+    Toplevel: GERBER2GCODE_-_Solder_paste_dispenser_for_3D_printer
+        Menu: gui_menubar  
+        TNotebook: gui_notebook  
+            Frame: gui_notebook_t0  
+                Labelframe: gui_labelframe_preview  
+                    Canvas: gui_preview_canvas  
+                    Button: gui_preview_button_topside   command: gui_preview_button_topside
+                    Button: gui_preview_button_bottomside   command: gui_preview_button_bottomside
+                Labelframe: gui_labelframe_import  
+                    Button: gui_button_importGerber   command: button_importGerber
+            Frame: gui_notebook_t3  
+                Labelframe: gui_labelframe_gcode_initial  
+                    Checkbutton: gui_checkbutton_gcode_autohome  
+                    Entry: Entry1  
+                    Spinbox: Spinbox1  
+                Labelframe: gui_labelframe_gcode_final  
+                Button: gui_gcode_button_load  
+                Button: gui_gcode_button_save  
+                Button: gui_gcode_button_reset  
+            Frame: gui_notebook_t1  
+            Frame: gui_notebook_t2  
+                Text: gui_log_window  
+                Button: gui_button_clearlog   command: gui_button_clearlog
+
