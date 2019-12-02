@@ -2,3 +2,4 @@
 .idea/
 gerber_contents
 *.bak*
+__pycache__/
